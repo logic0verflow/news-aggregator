@@ -55,6 +55,8 @@ APP.Main = (function() {
   var storyDetailsCommentTemplate =
       Handlebars.compile(tmplStoryDetailsComment);
 
+  var keyDetails = [];
+
   /**
    * As every single story arrives in shove its
    * content in at that exact moment. Feels like something
@@ -62,36 +64,35 @@ APP.Main = (function() {
    * probably in a requestAnimationFrame callback.
    */
   function onStoryData (key, details) {
+    keyDetails.push({
+      'key': key,
+      'details': details
+    });
 
-    // This seems odd. Surely we could just select the story
-    // directly rather than looping through all of them.
-    var storyElements = document.querySelectorAll('.story');
+    window.requestAnimationFrame(insertStory)
+  }
 
-    for (var i = 0; i < storyElements.length; i++) {
+  function insertStory () {
+    var kd = keyDetails.pop();
 
-      if (storyElements[i].getAttribute('id') === 's-' + key) {
+    var story = document.getElementById('s-' + kd.key);
+    kd.details.time *= 1000;
+    var html = storyTemplate(kd.details);
+    story.innerHTML = html;
+    story.addEventListener('click', onStoryClick.bind(this, kd.details));
+    story.classList.add('clickable');
 
-        details.time *= 1000;
-        var story = storyElements[i];
-        var html = storyTemplate(details);
-        story.innerHTML = html;
-        story.addEventListener('click', onStoryClick.bind(this, details));
-        story.classList.add('clickable');
-
-        // Tick down. When zero we can batch in the next load.
-        storyLoadCount--;
-
-      }
-    }
+    // Tick down. When zero we can batch in the next load.
+    storyLoadCount--;
 
     // Colorize on complete.
-    if (storyLoadCount === 0)
+    if (storyLoadCount === 95)
       colorizeAndScaleStories();
   }
 
   function onStoryClick(details) {
 
-    var storyDetails = $('sd-' + details.id);
+    var storyDetails = $('section.story-details');
 
     // Wait a little time then show the story details.
     setTimeout(showStory.bind(this, details.id), 60);
@@ -101,62 +102,63 @@ APP.Main = (function() {
     // And maybe, since they're all the same, I don't
     // need to make a new element every single time? I mean,
     // it inflates the DOM and I can only see one at once.
-    if (!storyDetails) {
+    if (storyDetails) {
+      storyDetails.remove();
+    }
 
-      if (details.url)
-        details.urlobj = new URL(details.url);
+    if (details.url)
+      details.urlobj = new URL(details.url);
 
-      var comment;
-      var commentsElement;
-      var storyHeader;
-      var storyContent;
+    var comment;
+    var commentsElement;
+    var storyHeader;
+    var storyContent;
 
-      var storyDetailsHtml = storyDetailsTemplate(details);
-      var kids = details.kids;
-      var commentHtml = storyDetailsCommentTemplate({
-        by: '', text: 'Loading comment...'
+    var storyDetailsHtml = storyDetailsTemplate(details);
+    var kids = details.kids;
+    var commentHtml = storyDetailsCommentTemplate({
+      by: '', text: 'Loading comment...'
+    });
+
+    storyDetails = document.createElement('section');
+    storyDetails.setAttribute('id', 'sd-' + details.id);
+    storyDetails.classList.add('story-details');
+    storyDetails.innerHTML = storyDetailsHtml;
+
+    document.body.appendChild(storyDetails);
+
+    commentsElement = storyDetails.querySelector('.js-comments');
+    storyHeader = storyDetails.querySelector('.js-header');
+    storyContent = storyDetails.querySelector('.js-content');
+
+    var closeButton = storyDetails.querySelector('.js-close');
+    closeButton.addEventListener('click', hideStory.bind(this, details.id));
+
+    var headerHeight = storyHeader.getBoundingClientRect().height;
+    storyContent.style.paddingTop = headerHeight + 'px';
+
+    if (typeof kids === 'undefined')
+      return;
+
+    for (var k = 0; k < kids.length; k++) {
+
+      comment = document.createElement('aside');
+      comment.setAttribute('id', 'sdc-' + kids[k]);
+      comment.classList.add('story-details__comment');
+      comment.innerHTML = commentHtml;
+      commentsElement.appendChild(comment);
+
+      // Update the comment with the live data.
+      APP.Data.getStoryComment(kids[k], function(commentDetails) {
+
+        commentDetails.time *= 1000;
+
+        var comment = commentsElement.querySelector(
+            '#sdc-' + commentDetails.id);
+        comment.innerHTML = storyDetailsCommentTemplate(
+            commentDetails,
+            localeData);
       });
-
-      storyDetails = document.createElement('section');
-      storyDetails.setAttribute('id', 'sd-' + details.id);
-      storyDetails.classList.add('story-details');
-      storyDetails.innerHTML = storyDetailsHtml;
-
-      document.body.appendChild(storyDetails);
-
-      commentsElement = storyDetails.querySelector('.js-comments');
-      storyHeader = storyDetails.querySelector('.js-header');
-      storyContent = storyDetails.querySelector('.js-content');
-
-      var closeButton = storyDetails.querySelector('.js-close');
-      closeButton.addEventListener('click', hideStory.bind(this, details.id));
-
-      var headerHeight = storyHeader.getBoundingClientRect().height;
-      storyContent.style.paddingTop = headerHeight + 'px';
-
-      if (typeof kids === 'undefined')
-        return;
-
-      for (var k = 0; k < kids.length; k++) {
-
-        comment = document.createElement('aside');
-        comment.setAttribute('id', 'sdc-' + kids[k]);
-        comment.classList.add('story-details__comment');
-        comment.innerHTML = commentHtml;
-        commentsElement.appendChild(comment);
-
-        // Update the comment with the live data.
-        APP.Data.getStoryComment(kids[k], function(commentDetails) {
-
-          commentDetails.time *= 1000;
-
-          var comment = commentsElement.querySelector(
-              '#sdc-' + commentDetails.id);
-          comment.innerHTML = storyDetailsCommentTemplate(
-              commentDetails,
-              localeData);
-        });
-      }
     }
 
   }
@@ -255,24 +257,16 @@ APP.Main = (function() {
   function colorizeAndScaleStories() {
 
     var storyElements = document.querySelectorAll('.story');
-
-    // It does seem awfully broad to change all the
-    // colors every time!
-
     var storyElementAmt = storyElements.length;
-
     for (var s = 0; s < storyElementAmt; s++) {
 
       var height = main.offsetHeight;
-
       var story = storyElements[s];
       var storyTop = story.getBoundingClientRect().top;
-      // var storyBottom = story.getBoundingClientRect().bottom;
 
       if (storyTop >= 0 && storyTop < height) {
         var score = story.querySelector('.story__score');
         var title = story.querySelector('.story__title');
-        // var mainPosition = main.getBoundingClientRect();
         var location = height - storyTop;
         var saturation = 100 * ((location + 170) / height);
         score.style.backgroundColor = 'hsl(42, ' + saturation + '%, 50%)';
@@ -281,18 +275,6 @@ APP.Main = (function() {
         title.style.opacity = opacity;
 
       }
-
-
-
-
-      // score.style.width = (scale * 40) + 'px';
-      // score.style.height = (scale * 40) + 'px';
-      // score.style.lineHeight = (scale * 40) + 'px';
-
-      // Now figure out how wide it is and use that to saturate it.
-      // scoreLocation = score.getBoundingClientRect();
-      // var saturation = (100 * ((scoreLocation.width - 38) / 2));
-
     }
   }
 
